@@ -1,7 +1,4 @@
-<img width="100" height="100" alt="image" src="https://github.com/user-attachments/assets/e1edd500-eb77-46d7-aca8-75e450ff3ef0" />
 
-### Add files
-Files should be added to the `files/` folder.
 
 ### Python
 
