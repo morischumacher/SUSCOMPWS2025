@@ -6,16 +6,15 @@ Install virtualenv
 
 ```console
 $ python3 -m venv venv
+(can be python or py)
 ```
 For VSCode select kernel from the venv folder
 
 Setup virtualenv and activate it
 
 ```console
-$ source venv.sh
-
-(To deactivate the virtualenv execute the following command):
-$ deactivate
+venv/Scripts/activate
+pip install -r requirements.txt
 ```
 
 Install strip package to not run into many merge conflict
