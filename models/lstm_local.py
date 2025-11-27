@@ -13,8 +13,6 @@ from numpy.f2py.crackfortran import verbose
 MODEL_NAME = 'BlockRNN_LSTM'
 
 TARGET_VAR = 'prec'
-target_scaler = Scaler()
-cov_scaler = Scaler()
 
 def load_data_into_df(filepath):
     df = pd.read_csv(
@@ -49,13 +47,15 @@ def separate_target_variable(df):
     return covariates_series, target_series
 
 def scale_and_split(covariates_series, target_series):
+    target_scaler = Scaler()
+    cov_scaler = Scaler()
     # Fit and transform
     target_scaled = target_scaler.fit_transform(target_series)
     cov_scaled = cov_scaler.fit_transform(covariates_series)
     # Split into train/validation (80/20 split)
     train_target, val_target = target_scaled.split_before(0.8)
     train_cov, val_cov = cov_scaled.split_before(0.8)
-    return train_cov, val_cov, train_target, val_target
+    return train_cov, val_cov, train_target, val_target, target_scaler
 
 def append_predictions_to_results(prec_1day_ahead, prec_3day_ahead, prec_7day_ahead, location_id):
     prediction_results.append(
@@ -121,7 +121,7 @@ if __name__ == '__main__':
     metric_results = []
     for csv_path in files[:5]:
         covariates_timeseries, target_timeseries = separate_target_variable(load_data_into_df(csv_path))
-        train_ts_cov, val_ts_cov, train_ts_target, val_ts_target = scale_and_split(covariates_timeseries, target_timeseries)
+        train_ts_cov, val_ts_cov, train_ts_target, val_ts_target, tar_scaler = scale_and_split(covariates_timeseries, target_timeseries)
         model = BlockRNNModel(
             input_chunk_length=30,  # Look back 30 days
             output_chunk_length=7,  # Predict 7 days
@@ -154,7 +154,7 @@ if __name__ == '__main__':
         )
 
         # Inverse transform to get real units (mm)
-        pred = target_scaler.inverse_transform(pred_scaled)
+        pred = tar_scaler.inverse_transform(pred_scaled)
 
         day_1 = pred[0].values()[0][0]
         day_3 = pred[2].values()[0][0]
@@ -181,13 +181,13 @@ if __name__ == '__main__':
 
     # save predictions to csv
     results_df = pd.DataFrame(prediction_results)
-    output_filename = f'nn_lstm_predictions.csv'
+    output_filename = f'nn_lstm_local_predictions.csv'
     results_df.to_csv(results_dir / output_filename, index=False)
     print(f"Predictions saved to {results_dir / output_filename}")
 
     # save metrics to csv
     metrics_df = pd.DataFrame(metric_results)
-    output_filename = f'nn_lstm_metrics.csv'
+    output_filename = f'nn_lstm_local_metrics.csv'
     metrics_df.to_csv(results_dir / output_filename, index=False)
     print(f"Metrics saved to {results_dir / output_filename}")
 
