@@ -5,28 +5,26 @@ import numpy as np
 
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-from joblib import Parallel, delayed
-
+from sklearn.preprocessing import MinMaxScaler
 
 # ============================================================
-# 1. CONFIG
+# CONFIG
 # ============================================================
 
-DATA_DIR = "../data_for_prediction/"
-RESULTS_DIR = Path("../prediction_results")
+DATA_DIR = "data_for_prediction/"
+ATTR_PATH = "data_for_prediction/1_attributes/Catchment_attributes.csv"
+
+RESULTS_DIR = Path("prediction_results/tree_global/")
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
+# Forecast horizons
 TARGETS = ["prec_1d_ahead", "prec_3d_ahead", "prec_7d_ahead"]
 LAGS = [1, 2, 3, 5, 7, 14, 30]
 
-MODEL_NAME = "tree_global_parallel"
-
-files = sorted(glob.glob(str(Path(DATA_DIR) / "*.csv")))
-print(f"Found {len(files)} station files.")
-
+selected_attrs = ['area_calc', 'elev_mean', 'slope_mean', 'forest_fra']
 
 # ============================================================
-# Helper: create lag features
+# HELPERS
 # ============================================================
 
 def add_lag_features(df, lag_list):
@@ -36,15 +34,13 @@ def add_lag_features(df, lag_list):
     return df
 
 
-# ============================================================
-# 2. Function to process ONE station (parallelised)
-# ============================================================
+def load_and_prepare_station(path, static_attributes):
+    """
+    Loads one CSV, creates lags, attaches static attributes,
+    and returns a dataframe with all features.
+    """
+    location_id = int(Path(path).stem.replace("ID_", ""))
 
-def process_station(path):
-    """Load station, train 3 models (1d, 3d, 7d), return predictions & metrics."""
-    location_id = Path(path).stem
-
-    # Load and prepare
     df = pd.read_csv(path)
 
     df["date"] = pd.to_datetime(
@@ -56,103 +52,135 @@ def process_station(path):
     )
 
     df = df.drop(columns=["YYYY", "MM", "DD", "DOY"])
+
+    # Add lag features
     df = add_lag_features(df, LAGS)
+
+    # Drop NaN (lag creation)
     df = df.dropna().reset_index(drop=True)
 
-    # Train/val split
-    split_idx = int(len(df) * 0.8)
-    train_df = df.iloc[:split_idx]
-    val_df = df.iloc[split_idx:]
+    # Add static attributes to each row
+    for col in selected_attrs:
+        df[col] = static_attributes.loc[location_id, col]
+
+    # Return with location included
+    df["location"] = location_id
+    return df
+
+
+# ============================================================
+# MAIN GLOBAL PROCESSING
+# ============================================================
+
+if __name__ == "__main__":
+
+    # Load & scale static attributes
+    attr_df = pd.read_csv(ATTR_PATH, sep=";", index_col="ID")[selected_attrs]
+
+    static_scaler = MinMaxScaler()
+    attr_scaled = pd.DataFrame(
+        static_scaler.fit_transform(attr_df),
+        columns=attr_df.columns,
+        index=attr_df.index
+    )
+
+    # Load all station files
+    files = sorted(glob.glob(str(Path(DATA_DIR) / "*.csv")))
+    print(f"Found {len(files)} basin files")
+
+    # ============================================================
+    # Build one big GLOBAL DATAFRAME
+    # ============================================================
+
+    all_data = []
+
+    for path in files:
+        try:
+            df_station = load_and_prepare_station(path, static_attributes=attr_scaled)
+            all_data.append(df_station)
+        except KeyError:
+            print(f"Skipping: {path} (missing static attributes)")
+            continue
+
+    global_df = pd.concat(all_data, ignore_index=True)
+    print("Global dataset size:", global_df.shape)
+
+    # Train/val split on GLOBAL time axis
+    split_idx = int(len(global_df) * 0.8)
+    train_df = global_df.iloc[:split_idx]
+    val_df = global_df.iloc[split_idx:]
 
     # Feature columns
-    lag_cols = [c for c in df.columns if c.startswith("prec_lag_")]
-    other_features = [c for c in df.columns
-                      if c not in TARGETS + ["prec", "date"] + lag_cols]
+    lag_cols = [c for c in global_df.columns if c.startswith("prec_lag_")]
+    dynamic_features = [
+        c for c in global_df.columns
+        if c not in TARGETS + ["prec", "date", "location"] + lag_cols + selected_attrs
+    ]
+    feature_cols = lag_cols + dynamic_features + selected_attrs
 
-    feature_cols = lag_cols + other_features
+    # To store results
+    all_predictions = []
+    all_metrics = []
 
-    station_predictions = []
-    station_metrics = []
+    # ============================================================
+    # TRAIN A GLOBAL MODEL FOR EACH HORIZON
+    # ============================================================
 
-    # Train model for each target
-    for target_col in TARGETS:
+    for target in TARGETS:
+        print(f"\nTraining global model for: {target}")
 
         X_train = train_df[feature_cols]
-        y_train = train_df[target_col]
+        y_train = train_df[target]
 
         X_val = val_df[feature_cols]
-        y_val = val_df[target_col]
+        y_val = val_df[target]
 
-        # Fit tree
         model = GradientBoostingRegressor(
             n_estimators=300,
             learning_rate=0.05,
             max_depth=3,
             random_state=42
         )
+
         model.fit(X_train, y_train)
 
         y_pred = model.predict(X_val)
 
-        # Predictions (per-row)
+        # Save predictions
         pred_df = pd.DataFrame({
-            "location": location_id,
             "date": val_df["date"],
-            "target": target_col,
-            "model": MODEL_NAME,
+            "location": val_df["location"],
+            "target": target,
+            "model": "tree_global",
             "y_true": y_val.values,
             "y_pred": y_pred
         })
-        station_predictions.append(pred_df)
+        all_predictions.append(pred_df)
 
-        # Metrics (one row)
+        # Metrics
         rmse = np.sqrt(mean_squared_error(y_val, y_pred))
         mae = mean_absolute_error(y_val, y_pred)
 
-        station_metrics.append(pd.DataFrame({
-            "location": [location_id],
-            "target": [target_col],
-            "model": [MODEL_NAME],
+        print(f"{target}: RMSE={rmse:.4f}, MAE={mae:.4f}")
+
+        all_metrics.append(pd.DataFrame({
+            "target": [target],
+            "model": ["tree_global"],
             "RMSE": [rmse],
             "MAE": [mae],
             "n": [len(y_val)]
         }))
 
-    # Return combined results for this station
-    return (
-        pd.concat(station_predictions, ignore_index=True),
-        pd.concat(station_metrics, ignore_index=True)
-    )
+    # ============================================================
+    # SAVE OUTPUT
+    # ============================================================
 
+    all_predictions = pd.concat(all_predictions, ignore_index=True)
+    all_metrics = pd.concat(all_metrics, ignore_index=True)
 
-# ============================================================
-# 3. RUN ALL STATIONS IN PARALLEL
-# ============================================================
+    all_predictions.to_csv(RESULTS_DIR / "predictions_tree_global.csv", index=False)
+    all_metrics.to_csv(RESULTS_DIR / "metrics_tree_global.csv", index=False)
 
-print("Running stations in parallel...")
-
-results = Parallel(n_jobs=-1, backend="loky", verbose=10)(
-    delayed(process_station)(path) for path in files
-)
-
-print("Parallel processing finished.")
-
-
-# ============================================================
-# 4. MERGE ALL RESULTS + SAVE
-# ============================================================
-
-all_predictions = pd.concat([r[0] for r in results], ignore_index=True)
-all_metrics = pd.concat([r[1] for r in results], ignore_index=True)
-
-pred_file = RESULTS_DIR / f"predictions_{MODEL_NAME}.csv"
-metrics_file = RESULTS_DIR / f"metrics_{MODEL_NAME}.csv"
-
-all_predictions.to_csv(pred_file, index=False)
-all_metrics.to_csv(metrics_file, index=False)
-
-print("------------------------------------------------")
-print("Saved predictions to:", pred_file)
-print("Saved metrics to:", metrics_file)
-print("Prediction rows:", len(all_predictions))
-print("Metric rows:", len(all_metrics))
+    print("\nSaved global predictions and metrics.")
+    print("Prediction rows:", len(all_predictions))
+    print("Metric rows:", len(all_metrics))
