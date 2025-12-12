@@ -2,16 +2,16 @@ import glob
 import os
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import torch.nn as nn
 from darts import TimeSeries
 from darts.dataprocessing.transformers import Scaler
-from darts.metrics import rmse, mae
+from darts.metrics import rmse
 from darts.models import BlockRNNModel
-import torch.nn as nn
-from matplotlib import pyplot as plt
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.preprocessing import MinMaxScaler
 
 ATTR_PATH = '../data_for_prediction/1_attributes/Catchment_attributes.csv'
 MODEL_NAME = 'BlockRNN_LSTM'
@@ -146,6 +146,126 @@ def setup_preds_and_vals_for_metrics(preds, vals):
     return data_points
 
 
+def calculate_permutation_importance(model, input_series, input_past_covariates, val_targets, verbose=True):
+    """
+    Calculates permutation importance for a Darts model.
+
+    Args:
+        model: Trained Darts model.
+        input_series: List of Series used as input for prediction (e.g., train_targets).
+        input_past_covariates: List of Series used as covariates (e.g., train_covs).
+        val_targets: List of Series acting as Ground Truth (scaled).
+    """
+
+    # 1. Calculate Baseline Error (RMSE)
+    if verbose: print("Calculating baseline performance...")
+    baseline_preds = model.predict(n=7, series=input_series, past_covariates=input_past_covariates)
+
+    # Compute global baseline RMSE (average over all basins)
+    baseline_errors = [rmse(val, pred) for val, pred in zip(val_targets, baseline_preds)]
+    baseline_score = np.mean(baseline_errors)
+
+    importances = {}
+
+    # ==========================================
+    # 2. Permute DYNAMIC Covariates (Time Dependent)
+    # ==========================================
+    # Get list of dynamic feature names from the first series
+    dynamic_features = input_past_covariates[0].components
+
+    for feature in dynamic_features:
+        if verbose: print(f"Testing importance of dynamic feature: {feature}")
+
+        # Create a deep copy of covariates to modify
+        shuffled_covs = [ts.copy() for ts in input_past_covariates]
+
+        # Shuffle this feature within each time series (breaks temporal structure)
+        for ts in shuffled_covs:
+            # Extract the array for this feature
+            feature_values = ts[feature].values()
+            # Shuffle in place
+            np.random.shuffle(feature_values)
+            # Update the TimeSeries with shuffled values
+            # (We use pandas mapping to handle Darts immutability easily)
+            df = ts.pd_dataframe()
+            df[feature] = feature_values
+            ts_new = TimeSeries.from_dataframe(df)
+            # Darts objects are tricky to mutate, simpler to overwrite list item if using index
+            # ideally we reconstruct, but for this snippet we assume standard TimeSeries
+            ts._series = df  # Hacky way to update, better to reconstruct:
+
+        # Reconstruct properly to be safe
+        shuffled_covs_safe = []
+        for ts in input_past_covariates:
+            df = ts.pd_dataframe().copy()
+            df[feature] = np.random.permutation(df[feature].values)
+            # Preserve static covariates if they exist on covariates (usually on target for BlockRNN)
+            new_ts = TimeSeries.from_dataframe(df)
+            shuffled_covs_safe.append(new_ts)
+
+        # Predict with shuffled feature
+        pred = model.predict(n=7, series=input_series, past_covariates=shuffled_covs_safe, verbose=False)
+
+        # Calculate score
+        errors = [rmse(val, p) for val, p in zip(val_targets, pred)]
+        new_score = np.mean(errors)
+
+        importances[feature] = new_score - baseline_score
+
+    # ==========================================
+    # 3. Permute STATIC Covariates (Attributes)
+    # ==========================================
+    # In Darts BlockRNN, static covariates are attached to the 'series' (target) input
+    if input_series[0].static_covariates is not None:
+        static_features = input_series[0].static_covariates.columns
+
+        for feature in static_features:
+            if verbose: print(f"Testing importance of static feature: {feature}")
+
+            # For static features, we shuffle ACROSS basins (swap basin A's area with Basin B's area)
+            # 1. Collect all values for this feature across the list
+            all_values = [ts.static_covariates[feature].item() for ts in input_series]
+            np.random.shuffle(all_values)
+
+            # 2. Create new series list with shuffled static attributes
+            shuffled_input_series = []
+            for i, ts in enumerate(input_series):
+                # Copy existing static covs
+                new_static_df = ts.static_covariates.copy()
+                # Assign the shuffled value
+                new_static_df[feature] = all_values[i]
+
+                # Create new TS with updated static covs
+                new_ts = ts.with_static_covariates(new_static_df)
+                shuffled_input_series.append(new_ts)
+
+            # Predict
+            pred = model.predict(n=7, series=shuffled_input_series, past_covariates=input_past_covariates,
+                                 verbose=False)
+
+            # Calculate score
+            errors = [rmse(val, p) for val, p in zip(val_targets, pred)]
+            new_score = np.mean(errors)
+
+            importances[feature] = new_score - baseline_score
+
+    return importances
+
+
+def plot_importance(importances):
+    # Sort importances
+    sorted_feats = sorted(importances.items(), key=lambda x: x[1], reverse=True)
+    names = [x[0] for x in sorted_feats]
+    values = [x[1] for x in sorted_feats]
+
+    plt.figure(figsize=(10, 6))
+    plt.barh(names, values, color='skyblue')
+    plt.xlabel('Increase in RMSE (Scaled Units)')
+    plt.title('Feature Importance (Permutation Method)')
+    plt.gca().invert_yaxis()  # Highest importance at top
+    plt.show()
+
+
 if __name__ == '__main__':
     attr_df = pd.read_csv(ATTR_PATH, sep=';', index_col='ID')
     attr_subset = attr_df[selected_attrs].copy()
@@ -168,7 +288,7 @@ if __name__ == '__main__':
 
     all_cov_ts = []
     all_target_ts = []
-    for csv_path in files:
+    for csv_path in files[:5]:
         filename = os.path.basename(csv_path)
         basin_id = int(os.path.splitext(filename)[0].removeprefix('ID_'))
         try:
@@ -294,3 +414,38 @@ if __name__ == '__main__':
     plt.ylabel('Count of Basins')
     plt.savefig(results_dir / 'nn_lstm_plot_per_basin_rmse.png')
 
+    print("\n--- Calculating Feature Importance ---")
+    # Note: We use train_targets/train_covs because that is what you used in
+    # model.predict() in your original script to generate the forecasts.
+    # We compare against val_targets (the ground truth for that window).
+
+    imps = calculate_permutation_importance(
+        model=model,
+        input_series=train_targets,  # The input history
+        input_past_covariates=train_covs,  # The weather input
+        val_targets=val_targets,  # The actual future values
+        verbose=True
+    )
+
+    # Save to CSV
+    imp_df = pd.DataFrame(list(imps.items()), columns=['Feature', 'Importance_RMSE_Increase'])
+    imp_df.sort_values(by='Importance_RMSE_Increase', ascending=False, inplace=True)
+    imp_df.to_csv(results_dir / 'nn_lstm_feature_importance.csv', index=False)
+    print("Feature importance saved.")
+
+    # Plot
+    plot_importance(imps)
+    # Critical Analysis for your Hydrology Use Case
+    # Static vs Dynamic Shuffling:
+    #
+    # Dynamic (Precipitation, Temp): The code shuffles these within the time series. This breaks the specific sequence of rain events.
+    # If prec is important, shuffling it will make the model miss the peak flows, causing a massive RMSE spike.
+    #
+    # Static (Area, Slope): The code shuffles these across basins. This tests if the model successfully learned that "Basin A (Steep)" behaves
+    # differently than "Basin B (Flat)". If the error doesn't increase when you shuffle slope_mean, your LSTM is likely treating all basins similarly
+    # and ignoring their physical properties.
+    #
+    # Negative Importance:
+    #
+    # If you see negative importance (Error decreased after shuffling), it means that feature was acting as noise and confusing the model.
+    # You should remove that feature from your selected_attrs list.
