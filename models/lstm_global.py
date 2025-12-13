@@ -288,7 +288,7 @@ if __name__ == '__main__':
 
     all_cov_ts = []
     all_target_ts = []
-    for csv_path in files[:5]:
+    for csv_path in files:
         filename = os.path.basename(csv_path)
         basin_id = int(os.path.splitext(filename)[0].removeprefix('ID_'))
         try:
