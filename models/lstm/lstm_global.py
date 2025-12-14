@@ -13,9 +13,13 @@ from darts.models import BlockRNNModel
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.preprocessing import MinMaxScaler
 
-ATTR_PATH = '../data_for_prediction/1_attributes/Catchment_attributes.csv'
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / ".." / "data" / "basins"
+DATA_DIR = DATA_DIR.resolve()
+ATTR_PATH = BASE_DIR / ".." / "data_for_prediction" / "1_attributes" / "Catchment_attributes.csv"
 MODEL_NAME = 'BlockRNN_LSTM'
-TARGET_VAR = 'prec'
+TARGET_VAR = "prec"
+
 # Select useful features. DO NOT use all columns (too much noise).
 # Good candidates: Area, Mean Elevation, Mean Slope, Forest Cover.
 selected_attrs = ['area_calc', 'elev_mean', 'slope_mean', 'forest_fra']
@@ -65,24 +69,28 @@ def load_data_into_df(filepath):
 
 
 def separate_target_variable(df):
-    # 1. Create the Target Series (What we want to predict)
-    target_series = TimeSeries.from_series(df[TARGET_VAR], freq='D')
+    # Target: daily precipitation
+    target_series = TimeSeries.from_series(df["prec"], freq="D")
 
-    # 2. Create the Covariates Series (All OTHER features)
-    # We drop the target column to create a dataframe of just features
-    covariates_df = df.drop(columns=[TARGET_VAR])
+    # Drop target + future leakage columns
+    DROP_COLS = [
+        "prec",
+        "prec_1d_ahead",
+        "prec_3d_ahead",
+        "prec_7d_ahead",
+    ]
 
-    # Convert features to Darts TimeSeries
-    covariates_series = TimeSeries.from_dataframe(covariates_df, freq='D')
+    covariates_df = df.drop(columns=DROP_COLS)
 
+    covariates_series = TimeSeries.from_dataframe(covariates_df, freq="D")
     return covariates_series, target_series
 
 
-def scale(covariates_series, target_series):
-    # Fit and transform
-    target_scaled = target_scaler.fit_transform(target_series)
-    cov_scaled = cov_scaler.fit_transform(covariates_series)
-    return target_scaled, cov_scaled
+def scale(cov_list, target_list):
+    target_scaler.fit(target_list)
+    cov_scaler.fit(cov_list)
+    return target_scaler.transform(target_list), cov_scaler.transform(cov_list)
+
 
 
 def calculate_metrics(day, data_points):
@@ -176,35 +184,16 @@ def calculate_permutation_importance(model, input_series, input_past_covariates,
     for feature in dynamic_features:
         if verbose: print(f"Testing importance of dynamic feature: {feature}")
 
-        # Create a deep copy of covariates to modify
-        shuffled_covs = [ts.copy() for ts in input_past_covariates]
-
-        # Shuffle this feature within each time series (breaks temporal structure)
-        for ts in shuffled_covs:
-            # Extract the array for this feature
-            feature_values = ts[feature].values()
-            # Shuffle in place
-            np.random.shuffle(feature_values)
-            # Update the TimeSeries with shuffled values
-            # (We use pandas mapping to handle Darts immutability easily)
-            df = ts.pd_dataframe()
-            df[feature] = feature_values
-            ts_new = TimeSeries.from_dataframe(df)
-            # Darts objects are tricky to mutate, simpler to overwrite list item if using index
-            # ideally we reconstruct, but for this snippet we assume standard TimeSeries
-            ts._series = df  # Hacky way to update, better to reconstruct:
-
         # Reconstruct properly to be safe
-        shuffled_covs_safe = []
+        shuffled_covs = []
         for ts in input_past_covariates:
-            df = ts.pd_dataframe().copy()
-            df[feature] = np.random.permutation(df[feature].values)
-            # Preserve static covariates if they exist on covariates (usually on target for BlockRNN)
-            new_ts = TimeSeries.from_dataframe(df)
-            shuffled_covs_safe.append(new_ts)
+            df = ts.to_dataframe().copy()
+            df[feature] = np.random.permutation(df[feature].to_numpy())
+            shuffled_covs.append(TimeSeries.from_dataframe(df, freq=ts.freq_str))
+
 
         # Predict with shuffled feature
-        pred = model.predict(n=7, series=input_series, past_covariates=shuffled_covs_safe, verbose=False)
+        pred = model.predict(n=7, series=input_series, past_covariates=shuffled_covs, verbose=False)
 
         # Calculate score
         errors = [rmse(val, p) for val, p in zip(val_targets, pred)]
@@ -302,10 +291,14 @@ if __name__ == '__main__':
         covariates_ts, target_ts = separate_target_variable(load_data_into_df(csv_path))
         all_cov_ts.append(covariates_ts)
         # MAGIC: makes model take static attributes take into account per basin
-        target_ts.with_static_covariates(static_cov_df)
+        target_ts = target_ts.with_static_covariates(static_cov_df)
         all_target_ts.append(target_ts)
 
     all_cov_ts_scaled, all_target_ts_scaled = scale(all_cov_ts, all_target_ts)
+    all_target_ts_scaled = [
+        t.with_static_covariates(orig.static_covariates)
+        for t, orig in zip(all_target_ts_scaled, all_target_ts)
+    ]
 
     # splits based on time so equal on any number of calls
     train_targets = [t.split_before(0.8)[0] for t in all_target_ts_scaled]
@@ -417,7 +410,9 @@ if __name__ == '__main__':
     print("\n--- Calculating Feature Importance ---")
     # Note: We use train_targets/train_covs because that is what you used in
     # model.predict() in your original script to generate the forecasts.
-    # We compare against val_targets (the ground truth for that window).
+        # We compare against val_targets (the ground truth for that window).
+    print("Dynamic covariates:", train_covs[0].components)
+    print("Static covariates:", train_targets[0].static_covariates.columns)
 
     imps = calculate_permutation_importance(
         model=model,
