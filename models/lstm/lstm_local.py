@@ -176,7 +176,7 @@ if __name__ == '__main__':
 
         append_metrics_to_results(rmse_d1, mae_d1, rmse_d3, mae_d3, rmse_d7, mae_d7, location)
 
-    results_dir = Path("../prediction_results")
+    results_dir = Path("../prediction_results/lstm")
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # save predictions to csv

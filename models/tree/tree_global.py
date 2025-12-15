@@ -11,8 +11,8 @@ from sklearn.preprocessing import MinMaxScaler
 # CONFIG
 # ============================================================
 
-DATA_DIR = "data_for_prediction/"
-ATTR_PATH = "data_for_prediction/1_attributes/Catchment_attributes.csv"
+DATA_DIR = "../data_for_prediction/"
+ATTR_PATH = "../data_for_prediction/1_attributes/Catchment_attributes.csv"
 
 RESULTS_DIR = Path("prediction_results/tree_global/")
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)

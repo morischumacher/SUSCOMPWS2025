@@ -475,12 +475,13 @@ if __name__ == "__main__":
         imp_df = pd.DataFrame(sorted(imps.items(), key=lambda x: x[1], reverse=True),
                               columns=["Feature", "Delta_RMSE_mm"])
         print(imp_df.head(20).to_string(index=False))
+        imp_df.to_csv(results_dir / "nn_lstm_global_feature_importance.csv", index=False)
         plot_importance(imps)
     else:
         print("No dynamic covariates found, skipping permutation importance.")
 
     # ---- save outputs
-    results_dir = (BASE_DIR / ".." / ".." / "prediction_results").resolve()
+    results_dir = (BASE_DIR / ".." / ".." / "prediction_results/lstm").resolve()
     results_dir.mkdir(parents=True, exist_ok=True)
 
     metrics_df = pd.DataFrame([

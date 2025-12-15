@@ -367,7 +367,7 @@ if __name__ == '__main__':
     print(f"Day 3: RMSE = {rmse_d3:.4f} mm | MAE = {mae_d3:.4f} mm")
     print(f"Day 7: RMSE = {rmse_d7:.4f} mm | MAE = {mae_d7:.4f} mm")
 
-    results_dir = Path("../prediction_results")
+    results_dir = Path("../prediction_results/lstm/")
     results_dir.mkdir(parents=True, exist_ok=True)
     metrics_results_df = pd.DataFrame([
         {'target': 'prec_1day_ahead', 'model': MODEL_NAME, 'RMSE': rmse_d1, 'MAE': mae_d1},

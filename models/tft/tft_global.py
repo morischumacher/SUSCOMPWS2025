@@ -221,7 +221,7 @@ if __name__ == '__main__':
     print(f"Day 7: RMSE = {rmse_d7:.4f} mm | MAE = {mae_d7:.4f} mm")
 
     # Save Results
-    results_dir = Path("../prediction_results")
+    results_dir = Path("../prediction_results/tft/")
     results_dir.mkdir(parents=True, exist_ok=True)
     metrics_results_df = pd.DataFrame([
         {'target': 'prec_1day_ahead', 'model': MODEL_NAME, 'RMSE': rmse_d1, 'MAE': mae_d1},

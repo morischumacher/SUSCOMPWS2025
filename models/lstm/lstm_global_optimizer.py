@@ -193,7 +193,7 @@ if __name__ == '__main__':
     )
 
     # 3. Print and save Results
-    results_dir = Path("../prediction_results")
+    results_dir = Path("../prediction_results/lstm")
     results_file = "lstm_optimization_results.txt"
     with open(results_dir / results_file, "w") as f:
         try:
