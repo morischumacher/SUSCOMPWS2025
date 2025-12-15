@@ -173,5 +173,4 @@ shell.nix
 
 app/tmp/*
 
-prediction_results/baseline/baseline_predictions_ma-3.csv
-prediction_results/baseline/baseline_predictions_persistence.csv
+prediction_results/baseline/baseline_predictions*.csv
