@@ -39,6 +39,7 @@ os.environ["PL_LOGGING"] = "0"
 BASE_DIR = Path(__file__).resolve().parent
 ATTR_PATH = BASE_DIR / ".." / ".." / "data_for_prediction" / "1_attributes" / "Catchment_attributes.csv"
 DATA_DIR = (BASE_DIR / ".." / ".." / "data_for_prediction").resolve()
+RESULTS_DIR=(BASE_DIR / ".." / ".." / "prediction_results").resolve()
 
 MODEL_NAME = "BlockRNN_LSTM"
 TARGET_VAR = "prec"
@@ -354,14 +355,15 @@ if __name__ == "__main__":
 
     # ---- build "full covariates" covering train end + horizon
     # For past_covariates, Darts needs covariates to extend through prediction horizon.
+    # ---- build "full covariates" covering ENTIRE val (so any random window can be evaluated)
     if train_covs is not None:
         full_covs = []
         for tr_c, va_c in zip(train_covs, val_covs):
-            # concatenate enough of validation covariates to cover horizon
-            va_needed = va_c[:HORIZON]
-            full_covs.append(tr_c.append(va_needed))
+            # full covs = train covs + all validation covs
+            full_covs.append(tr_c.append(va_c))
     else:
         full_covs = None
+
 
     # ---- model (fix dropout by using >=2 layers)
     model = BlockRNNModel(
@@ -371,7 +373,7 @@ if __name__ == "__main__":
         hidden_dim=32,
         n_rnn_layers=2,     # enables dropout properly
         dropout=0.1,
-        n_epochs=15,
+        n_epochs=0,
         batch_size=64,
         random_state=42,
         loss_fn=nn.L1Loss(),
@@ -385,13 +387,56 @@ if __name__ == "__main__":
         verbose=True,
     )
 
-    # ---- predict next 7 days from end of train, compare to first 7 days of val
-    preds_scaled = model.predict(n=HORIZON, series=train_targets, past_covariates=full_covs, verbose=False)
+    # ---- RANDOM 7-DAY EVALUATION WINDOW PER BASIN (alleviates dry dominance)
+    rng = np.random.default_rng(42) # 42 the answer to everything lol
+
+    eval_train_raw = []
+    eval_train_scaled = []
+    eval_full_covs = []
+    true_horizon = []
+
+    for tr_raw, va_raw, tr_scaled, va_scaled, fc in zip(
+        train_targets_raw,
+        val_targets_raw,
+        train_targets,
+        val_targets,
+        full_covs
+    ):
+        max_start = len(va_raw) - HORIZON
+        if max_start <= 0:
+            continue
+
+        start = rng.integers(0, max_start + 1)
+
+        # history up to forecast origin
+        hist_raw = tr_raw.append(va_raw[:start])
+        hist_scaled = tr_scaled.append(va_scaled[:start])
+
+        # true future (unscaled)
+        truth = va_raw[start:start + HORIZON]
+
+        # covariates must end at or after end of horizon
+        horizon_end = truth.end_time()
+        cov_hist = fc.slice(fc.start_time(), horizon_end)
+
+        eval_train_raw.append(hist_raw)
+        eval_train_scaled.append(hist_scaled)
+        eval_full_covs.append(cov_hist)
+        true_horizon.append(truth)
+
+
+    print("Example series end:", eval_train_scaled[0].end_time())
+    print("Example cov end:   ", eval_full_covs[0].end_time())
+    print("Example truth end: ", true_horizon[0].end_time())
+    # predict from random origins
+    preds_scaled = model.predict(
+        n=HORIZON,
+        series=eval_train_scaled,
+        past_covariates=eval_full_covs,
+        verbose=False
+    )
     preds = target_scaler.inverse_transform(preds_scaled)
 
-
-    # True 7-day window (unscaled)
-    true_horizon = [v[:HORIZON] for v in val_targets_raw]
 
     # ---- compute pooled per-horizon metrics
     day_points = {1: [], 3: [], 7: []}
@@ -475,21 +520,21 @@ if __name__ == "__main__":
         imp_df = pd.DataFrame(sorted(imps.items(), key=lambda x: x[1], reverse=True),
                               columns=["Feature", "Delta_RMSE_mm"])
         print(imp_df.head(20).to_string(index=False))
-        imp_df.to_csv(results_dir / "nn_lstm_global_feature_importance.csv", index=False)
+        imp_df.to_csv(RESULTS_DIR / "nn_lstm_global_feature_importance.csv", index=False)
         plot_importance(imps)
     else:
         print("No dynamic covariates found, skipping permutation importance.")
 
     # ---- save outputs
-    results_dir = (BASE_DIR / ".." / ".." / "prediction_results/lstm").resolve()
-    results_dir.mkdir(parents=True, exist_ok=True)
+    RESULTS_DIR = (BASE_DIR / ".." / ".." / "prediction_results/lstm").resolve()
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     metrics_df = pd.DataFrame([
         {"target": "prec_1d", "model": MODEL_NAME, "RMSE": rmse_d1, "MAE": mae_d1},
         {"target": "prec_3d", "model": MODEL_NAME, "RMSE": rmse_d3, "MAE": mae_d3},
         {"target": "prec_7d", "model": MODEL_NAME, "RMSE": rmse_d7, "MAE": mae_d7},
     ])
-    metrics_df.to_csv(results_dir / "nn_lstm_global_metrics_per_day.csv", index=False)
+    metrics_df.to_csv(RESULTS_DIR / "nn_lstm_global_metrics_per_day.csv", index=False)
 
     basin_df = pd.DataFrame([{
         "model": MODEL_NAME,
@@ -497,6 +542,6 @@ if __name__ == "__main__":
         "worst_basin_RMSE_7day": float(np.max(basin_full_rmses)),
         "mean_basin_RMSE_7day": float(np.mean(basin_full_rmses)),
     }])
-    basin_df.to_csv(results_dir / "nn_lstm_global_metrics_per_basin.csv", index=False)
+    basin_df.to_csv(RESULTS_DIR / "nn_lstm_global_metrics_per_basin.csv", index=False)
 
-    print(f"\nSaved metrics to: {results_dir}")
+    print(f"\nSaved metrics to: {RESULTS_DIR}")
