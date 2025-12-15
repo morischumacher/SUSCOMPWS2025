@@ -1,0 +1,23 @@
+--- Permutation Importance (dynamic covariates only) ---
+Baseline (mean 7-day RMSE across basins): 2.0939 mm
+                Feature  Delta_RMSE_mm
+surf_net_solar_rad_mean       3.311557
+            2m_temp_max       1.890461
+           lai_high_veg       1.157301
+           2m_temp_mean       1.076101
+             surf_press       1.064297
+             10m_wind_u       1.060955
+surf_net_therm_rad_mean       0.883310
+         2m_dp_temp_max       0.543748
+ surf_net_solar_rad_max       0.494699
+ surf_net_therm_rad_max       0.493217
+            2m_temp_min       0.336773
+         2m_dp_temp_min       0.291038
+              volsw_123       0.235473
+                    swe       0.224505
+               total_et       0.191259
+               fcst_alb       0.145839
+             10m_wind_v       0.125691
+        2m_dp_temp_mean       0.109535
+                volsw_4       0.038903
+            lai_low_veg      -0.029398
