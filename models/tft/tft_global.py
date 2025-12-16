@@ -14,7 +14,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 MODEL_NAME = 'TFT_Model'
-ATTR_PATH = '../data_for_prediction/1_attributes/Catchment_attributes.csv'
+ATTR_PATH = '../../data_for_prediction/1_attributes/Catchment_attributes.csv'
 TARGET_VAR = 'prec'
 selected_attrs = ['area_calc', 'elev_mean', 'slope_mean', 'forest_fra']
 target_scaler = Scaler()
@@ -34,7 +34,7 @@ def load_data_into_df(filepath):
     }))
 
     df = df.set_index('Date')
-    df.drop(columns=['YYYY', 'MM', 'DD', 'DOY'], inplace=True)
+    df.drop(columns=['YYYY', 'MM', 'DD', 'DOY', 'prec_1d_ahead', 'prec_3d_ahead', 'prec_7d_ahead'], inplace=True)
     return df
 
 
@@ -124,7 +124,7 @@ if __name__ == '__main__':
 
     print(f"Loaded attributes for {len(attr_scaled_df)} basins.")
 
-    data_dir = "../data_for_prediction/"
+    data_dir = "../../data_for_prediction/"
     file_pattern = str(Path(data_dir) / "*.csv")
     files = glob.glob(file_pattern)
     print(f"Found {len(files)} files")
@@ -151,20 +151,18 @@ if __name__ == '__main__':
         target_ts = target_ts.with_static_covariates(static_cov_df)
         all_target_ts.append(target_ts)
 
-    all_cov_ts_scaled, all_target_ts_scaled = scale(all_cov_ts, all_target_ts)
+    train_targets_raw = [t.split_before(0.8)[0] for t in all_target_ts]
+    val_targets_raw = [t.split_before(0.8)[1] for t in all_target_ts]
 
-    # CRITICAL FIX for TFT:
-    # The Scaler sometimes strips static covariates in older Darts versions.
-    # We re-attach them just to be 100% safe, as TFT fails without them.
-    for j, ts in enumerate(all_target_ts_scaled):
-        if ts.static_covariates is None:
-            all_target_ts_scaled[j] = ts.with_static_covariates(all_target_ts[j].static_covariates)
+    train_covs_raw = [c.split_before(0.8)[0] for c in all_cov_ts]
+    val_covs_raw = [c.split_before(0.8)[1] for c in all_cov_ts]
 
-    train_targets = [t.split_before(0.8)[0] for t in all_target_ts_scaled]
-    val_targets = [t.split_before(0.8)[1] for t in all_target_ts_scaled]
+    train_targets = target_scaler.fit_transform(train_targets_raw)
+    train_covs = cov_scaler.fit_transform(train_covs_raw)
 
-    train_covs = [c.split_before(0.8)[0] for c in all_cov_ts_scaled]
-    val_covs = [c.split_before(0.8)[1] for c in all_cov_ts_scaled]
+    # Transform validation list using the trained scaler (DO NOT FIT)
+    val_targets = target_scaler.transform(val_targets_raw)
+    val_covs = cov_scaler.transform(val_covs_raw)
 
     model = TFTModel(
         input_chunk_length=30,
