@@ -33,7 +33,7 @@ def objective(trial):
         dropout=dropout if n_layers > 1 else 0.0,
         batch_size=batch_size,
         optimizer_kwargs={"lr": lr},
-        n_epochs=8,
+        n_epochs=5,
         random_state=42,
         loss_fn=nn.L1Loss(),
     )
@@ -70,7 +70,7 @@ def objective(trial):
 if __name__ == "__main__":
 
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=30, show_progress_bar=True)
+    study.optimize(objective, n_trials=12, show_progress_bar=True)
 
     print("\n--- Optuna Results (LSTM) ---")
     print(study.best_trial.params)
