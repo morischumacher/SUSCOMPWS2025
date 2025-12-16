@@ -89,7 +89,7 @@ if __name__ == "__main__":
         dropout=best["dropout"] if best["n_rnn_layers"] > 1 else 0.0,
         batch_size=best["batch_size"],
         optimizer_kwargs={"lr": best["learning_rate"]},
-        n_epochs=15,
+        n_epochs=12,
         random_state=42,
         loss_fn=nn.L1Loss(),
     )
