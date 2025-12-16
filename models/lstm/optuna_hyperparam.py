@@ -117,6 +117,7 @@ if __name__ == "__main__":
     )
 
     rmse_1d, rmse_3d, rmse_7d, rmse_full = [], [], [], []
+    mae_1d, mae_3d, mae_7d = [], [], []
 
     for p_ts, t_ts in zip(preds, pipe["true_horizon"]):
         res = evaluate_one_forecast(p_ts, t_ts)
@@ -124,18 +125,29 @@ if __name__ == "__main__":
         rmse_3d.append(res[3]["rmse"])
         rmse_7d.append(res[7]["rmse"])
         rmse_full.append(res["full_rmse"])
-
+        
+        mae_1d.append(res[1]["mae"])
+        mae_3d.append(res[3]["mae"])
+        mae_7d.append(res[7]["mae"])
+        
     print("\n--- Global Metrics ---")
     print(f"Day 1 RMSE: {np.mean(rmse_1d):.4f} mm")
     print(f"Day 3 RMSE: {np.mean(rmse_3d):.4f} mm")
     print(f"Day 7 RMSE: {np.mean(rmse_7d):.4f} mm")
     print(f"Full 7-day RMSE: {np.mean(rmse_full):.4f} mm")
+    print(f"Day 1 MAE: {np.mean(mae_1d):.4f} mm")
+    print(f"Day 3 MAE: {np.mean(mae_3d):.4f} mm")
+    print(f"Day 7 MAE: {np.mean(mae_7d):.4f} mm")
 
     out_df = pd.DataFrame([
-        {"target": "prec_1d", "model": "BlockRNN_LSTM_tuned_12ep", "RMSE": np.mean(rmse_1d)},
-        {"target": "prec_3d", "model": "BlockRNN_LSTM_tuned_12ep", "RMSE": np.mean(rmse_3d)},
-        {"target": "prec_7d", "model": "BlockRNN_LSTM_tuned_12ep", "RMSE": np.mean(rmse_7d)},
+        {"target": "prec_1d", "model": "BlockRNN_LSTM_tuned_12ep",
+        "RMSE": np.mean(rmse_1d), "MAE": np.mean(mae_1d)},
+        {"target": "prec_3d", "model": "BlockRNN_LSTM_tuned_12ep",
+        "RMSE": np.mean(rmse_3d), "MAE": np.mean(mae_3d)},
+        {"target": "prec_7d", "model": "BlockRNN_LSTM_tuned_12ep",
+        "RMSE": np.mean(rmse_7d), "MAE": np.mean(mae_7d)},
     ])
+
 
     out_path = "nn_lstm_tuned_metrics_per_day.csv"
     out_df.to_csv(out_path, index=False)
