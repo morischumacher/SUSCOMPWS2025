@@ -1,6 +1,0 @@
-Best Trial Score (RMSE): 0.0001
-Best Parameters:
-  hidden_dim: 43
-  n_rnn_layers: 1
-  dropout: 0.0019931860519986967
-  lr: 0.0004290498767711267
