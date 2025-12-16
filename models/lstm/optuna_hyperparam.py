@@ -1,6 +1,7 @@
 import optuna
 import numpy as np
 import torch.nn as nn
+import pandas as pd
 from darts.models import BlockRNNModel
 
 from lstm_global_fix import build_pipeline, evaluate_one_forecast, HORIZON
@@ -33,9 +34,13 @@ def objective(trial):
         dropout=dropout if n_layers > 1 else 0.0,
         batch_size=batch_size,
         optimizer_kwargs={"lr": lr},
-        n_epochs=5,
+        n_epochs=7,
         random_state=42,
         loss_fn=nn.L1Loss(),
+        pl_trainer_kwargs={
+            "accelerator": "gpu",
+            "devices": 1,
+        }
     )
 
     model.fit(
@@ -70,7 +75,7 @@ def objective(trial):
 if __name__ == "__main__":
 
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=5, show_progress_bar=True)
+    study.optimize(objective, n_trials=10, show_progress_bar=True)
 
     print("\n--- Optuna Results (LSTM) ---")
     print(study.best_trial.params)
@@ -89,7 +94,7 @@ if __name__ == "__main__":
         dropout=best["dropout"] if best["n_rnn_layers"] > 1 else 0.0,
         batch_size=best["batch_size"],
         optimizer_kwargs={"lr": best["learning_rate"]},
-        n_epochs=12,
+        n_epochs=15,
         random_state=42,
         loss_fn=nn.L1Loss(),
     )
@@ -125,3 +130,14 @@ if __name__ == "__main__":
     print(f"Day 3 RMSE: {np.mean(rmse_3d):.4f} mm")
     print(f"Day 7 RMSE: {np.mean(rmse_7d):.4f} mm")
     print(f"Full 7-day RMSE: {np.mean(rmse_full):.4f} mm")
+
+    out_df = pd.DataFrame([
+        {"target": "prec_1d", "model": "BlockRNN_LSTM_tuned_12ep", "RMSE": np.mean(rmse_1d)},
+        {"target": "prec_3d", "model": "BlockRNN_LSTM_tuned_12ep", "RMSE": np.mean(rmse_3d)},
+        {"target": "prec_7d", "model": "BlockRNN_LSTM_tuned_12ep", "RMSE": np.mean(rmse_7d)},
+    ])
+
+    out_path = "nn_lstm_tuned_metrics_per_day.csv"
+    out_df.to_csv(out_path, index=False)
+
+    print(f"\nSaved tuned RMSE metrics to: {out_path}")
