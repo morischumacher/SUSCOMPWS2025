@@ -70,7 +70,7 @@ def objective(trial):
 if __name__ == "__main__":
 
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=12, show_progress_bar=True)
+    study.optimize(objective, n_trials=5, show_progress_bar=True)
 
     print("\n--- Optuna Results (LSTM) ---")
     print(study.best_trial.params)
