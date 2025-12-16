@@ -253,12 +253,21 @@ def plot_importance(importances, title="Permutation Importance (ΔRMSE in mm)"):
     plt.tight_layout()
     plt.show()
 
+def build_pipeline(random_seed=42):
+    """
+    Builds data, scalers, evaluation windows.
+    Returns everything needed for training & evaluation.
+    """
 
-# =========================
-# Main
-# =========================
-if __name__ == "__main__":
-    # ---- load + scale static attributes (only for basins used)
+    # ---- everything from your current __main__ block
+    # ---- UP TO (and including) creation of:
+    # train_targets, train_covs, val_targets, val_covs
+    # eval_train_scaled, eval_full_covs, true_horizon
+    # target_scaler
+
+    # (This is literally a CUT-PASTE of existing code,
+    #  just indented into this function.)
+# ---- load + scale static attributes (only for basins used)
     attr_df = pd.read_csv(ATTR_PATH, sep=";", index_col="ID")
     attr_subset = attr_df[SELECTED_ATTRS].copy()
 
@@ -356,6 +365,7 @@ if __name__ == "__main__":
     # ---- build "full covariates" covering train end + horizon
     # For past_covariates, Darts needs covariates to extend through prediction horizon.
     # ---- build "full covariates" covering ENTIRE val (so any random window can be evaluated)
+    rng = np.random.default_rng(42)         # 42 the answer to everything lol
     if train_covs is not None:
         full_covs = []
         for tr_c, va_c in zip(train_covs, val_covs):
@@ -363,32 +373,6 @@ if __name__ == "__main__":
             full_covs.append(tr_c.append(va_c))
     else:
         full_covs = None
-
-
-    # ---- model (fix dropout by using >=2 layers)
-    model = BlockRNNModel(
-        input_chunk_length=INPUT_LEN,
-        output_chunk_length=HORIZON,
-        model="LSTM",
-        hidden_dim=32,
-        n_rnn_layers=2,     # enables dropout properly
-        dropout=0.1,
-        n_epochs=0,
-        batch_size=64,
-        random_state=42,
-        loss_fn=nn.L1Loss(),
-    )
-
-    model.fit(
-        series=train_targets,
-        past_covariates=train_covs,
-        val_series=val_targets,
-        val_past_covariates=val_covs,
-        verbose=True,
-    )
-
-    # ---- RANDOM 7-DAY EVALUATION WINDOW PER BASIN (alleviates dry dominance)
-    rng = np.random.default_rng(42) # 42 the answer to everything lol
 
     eval_train_raw = []
     eval_train_scaled = []
@@ -423,6 +407,65 @@ if __name__ == "__main__":
         eval_train_scaled.append(hist_scaled)
         eval_full_covs.append(cov_hist)
         true_horizon.append(truth)
+        
+    return dict(
+        train_targets=train_targets,
+        train_targets_raw=train_targets_raw,
+        train_covs=train_covs,
+        val_targets=val_targets,
+        val_covs=val_covs,
+        eval_train_scaled=eval_train_scaled,
+        eval_full_covs=eval_full_covs,
+        true_horizon=true_horizon,
+        target_scaler=target_scaler,
+        full_covs=full_covs,
+    )
+    
+# =========================
+# Main
+# =========================
+if __name__ == "__main__":
+    
+    pipe = build_pipeline()
+    train_targets       = pipe["train_targets"]
+    train_targets_raw   = pipe["train_targets_raw"]
+    train_covs          = pipe["train_covs"]
+    val_targets         = pipe["val_targets"]
+    val_covs            = pipe["val_covs"]
+    eval_train_scaled   = pipe["eval_train_scaled"]
+    eval_full_covs      = pipe["eval_full_covs"]
+    true_horizon        = pipe["true_horizon"]
+    target_scaler       = pipe["target_scaler"]
+    full_covs           = pipe["full_covs"]
+
+    
+    
+
+
+    # ---- model (fix dropout by using >=2 layers)
+    model = BlockRNNModel(
+        input_chunk_length=INPUT_LEN,
+        output_chunk_length=HORIZON,
+        model="LSTM",
+        hidden_dim=32,
+        n_rnn_layers=2,     # enables dropout properly
+        dropout=0.1,
+        n_epochs=0,
+        batch_size=64,
+        random_state=42,
+        loss_fn=nn.L1Loss(),
+    )
+
+    model.fit(
+        series=train_targets,
+        past_covariates=train_covs,
+        val_series=val_targets,
+        val_past_covariates=val_covs,
+        verbose=True,
+    )
+
+    # ---- RANDOM 7-DAY EVALUATION WINDOW PER BASIN (alleviates dry dominance)
+    
 
 
     print("Example series end:", eval_train_scaled[0].end_time())
