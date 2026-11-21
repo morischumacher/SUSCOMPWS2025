@@ -1,15 +1,18 @@
 # Precipitation Forecasting for Austria
 
-## At a glance
+A comparison of models that forecast daily precipitation 1, 3 and 7 days ahead at 100 locations around the centre of Austria. Team project in Introduction to Computational Sustainability, TU Wien (winter term 2025/26).
 
-| | |
-|---|---|
-| **What** | A comparison of models that forecast daily precipitation 1, 3 and 7 days ahead at 100 locations around the centre of Austria. Team project in Introduction to Computational Sustainability, TU Wien (winter term 2025/26). |
-| **Approach** | Data cleaning and analysis, then simple baselines (persistence, 3-day moving average) against gradient boosting, LightGBM, an LSTM and a Temporal Fusion Transformer. Every model writes its results in one shared format, so they can be compared directly ([results notebook](results.ipynb)). |
-| **Related** | [Quantizing Qwen2-VL](https://github.com/morischumacher/Quantizing-Qwen2-VL), from the same course |
-| **Stack** | Python, pandas, scikit-learn, LightGBM, Darts (PyTorch), Optuna, Jupyter |
+## Approach
 
+- Data cleaning and analysis first.
+- Simple baselines (persistence, 3-day moving average) against gradient boosting, LightGBM, an LSTM and a Temporal Fusion Transformer.
+- Every model writes its results in one shared format, so they can be compared directly ([results notebook](results.ipynb)).
 
+From the same course: [Quantizing Qwen2-VL](https://github.com/morischumacher/Quantizing-Qwen2-VL).
+
+## Tech stack
+
+Python, pandas, scikit-learn, LightGBM, Darts (PyTorch), Optuna, Jupyter
 
 ### Python
 
